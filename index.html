@@ -439,6 +439,7 @@
 
   .overlay{position:fixed;inset:0;background:rgba(28,36,48,0.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
   .overlay-card{max-width:420px;width:100%;}
+  .key-name{width:100%;margin:0 0 12px;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font:inherit;font-size:14px;color:var(--ink);background:#fff;}
 
   footer.hint{
     text-align:center;
@@ -10490,6 +10491,7 @@ const SYNC_URL = "https://unpfcmdbdcpstsdnatud.supabase.co";  // Supabase Projec
 const SYNC_ANON = "sb_publishable_v6QdtRd2q62-1zplFR6uzw_LL_WppI8";  // 공개용(publishable) 키. secret/service_role 키는 절대 넣지 말 것
 const LS_SYNC_KEY = "saf_eng_trainer_v1_synckey";
 const LS_RESET_AT = "saf_eng_trainer_v1_resetat";
+const LS_KEY_NAME = "saf_eng_trainer_v1_keyname";
 let syncKey = null;
 try{ syncKey = localStorage.getItem(LS_SYNC_KEY); }catch(e){}
 let syncTimer = null, syncQueue = Promise.resolve();
@@ -10588,12 +10590,24 @@ function scheduleSync(){
   clearTimeout(syncTimer);
   syncTimer = setTimeout(()=> syncNow(), 1500);
 }
-function setSyncKey(k){
+// 키 파일 이름: 기본값은 "CBT키_" + 무작위 4글자, 사용자가 바꿀 수 있고 키 파일 안에도 저장된다.
+function randomKeyName(){
+  const chars = "abcdefghjkmnpqrstuvwxyz23456789"; // 헷갈리는 글자(0,o,1,l,i) 제외
+  return "CBT키_" + [...crypto.getRandomValues(new Uint8Array(4))].map(b => chars[b % chars.length]).join("");
+}
+function cleanKeyName(s){ return String(s || "").replace(/\.json$/i, "").replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 60); }
+function setSyncKey(k, name){
   syncKey = k;
-  try{ localStorage.setItem(LS_SYNC_KEY, k); }catch(e){}
+  try{
+    localStorage.setItem(LS_SYNC_KEY, k);
+    localStorage.setItem(LS_KEY_NAME, cleanKeyName(name) || randomKeyName());
+  }catch(e){}
 }
 function downloadKey(){
-  downloadJson({ app:"산업안전기사 CBT 트레이너", note:"이 파일이 있으면 어느 기기에서든 풀이 기록을 불러올 수 있어요. 남에게 주지 마세요.", key:syncKey }, "CBT트레이너_동기화키.json");
+  let name = "";
+  try{ name = localStorage.getItem(LS_KEY_NAME); }catch(e){}
+  name = cleanKeyName(name) || randomKeyName();
+  downloadJson({ app:"산업안전기사 CBT 트레이너", name, note:"이 파일이 있으면 어느 기기에서든 풀이 기록을 불러올 수 있어요. 남에게 주지 마세요.", key:syncKey }, name + ".json");
 }
 // 처음 실행(또는 브라우저 데이터를 지운 뒤) 한 번 뜨는 화면
 function showSyncOverlay(){
@@ -10601,15 +10615,18 @@ function showSyncOverlay(){
   ov.className = "overlay";
   ov.innerHTML = `<section class="panel overlay-card">
       <h2>기록 저장 키 정하기</h2>
-      <p class="section-sub">풀이 기록을 암호화해서 클라우드에 저장해요. 처음이면 키 파일을 받아 잘 보관하세요. 다른 기기에서 쓰거나 브라우저 데이터를 지운 뒤에는 그 키 파일을 불러오면 기록이 돌아와요.</p>
+      <p class="section-sub">풀이 기록을 암호화해서 클라우드에 저장해요. 처음이면 아래 이름(바꿔도 돼요)으로 키 파일을 받아 잘 보관하세요. 다른 기기에서 쓰거나 브라우저 데이터를 지운 뒤에는 그 키 파일을 불러오면 기록이 돌아와요.</p>
+      <input class="key-name" id="keyName" maxlength="60" aria-label="키 파일 이름">
       <div class="btn-row">
         <button class="btn" id="newKeyBtn">처음 시작 · 키 파일 받기</button>
         <label class="btn secondary" style="cursor:pointer;">키 파일 불러오기<input type="file" accept=".json,application/json" id="keyInput" style="display:none;"></label>
       </div>
     </section>`;
   document.body.appendChild(ov);
+  const nameInput = ov.querySelector("#keyName");
+  nameInput.value = randomKeyName();
   ov.querySelector("#newKeyBtn").addEventListener("click", ()=>{
-    setSyncKey(toB64(crypto.getRandomValues(new Uint8Array(32))));
+    setSyncKey(toB64(crypto.getRandomValues(new Uint8Array(32))), nameInput.value);
     downloadKey();
     ov.remove();
     syncNow();
@@ -10618,9 +10635,9 @@ function showSyncOverlay(){
     const file = e.target.files[0];
     if(!file) return;
     file.text().then(t=>{
-      const k = JSON.parse(t).key;
+      const j = JSON.parse(t), k = j.key;
       if(!k || fromB64(k).length !== 32) throw new Error("bad key");
-      setSyncKey(k);
+      setSyncKey(k, j.name || file.name);
       ov.remove();
       syncNow();
     }).catch(()=> alert("올바른 키 파일이 아닙니다."));
